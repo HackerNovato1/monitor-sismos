@@ -4,37 +4,56 @@ import requests
 import threading
 from http.server import HTTPServer, BaseHTTPRequestHandler
 
-DB_ENDPOINT = "https://alertasismica-bf17b-default-rtdb.firebaseio.com/alerta.json"
-USGS_API_URL = "https://earthquake.usgs.gov/earthquakes/feed/v1.0/summary/all_hour.geojson"
-MAGNITUD_MINIMA = 4.5
-ULTIMO_ID_PROCESADO = None
+DB_URL = "https://alertasismica-bf17b-default-rtdb.firebaseio.com/alerta.json"
+USGS_URL = "https://earthquake.usgs.gov/earthquakes/feed/v1.0/summary/all_hour.geojson"
+MAG_MIN = 4.5
+LAST_ID = None
 
-def actualizar_firebase(activa, epicentro="Normal", segundos=0):
-    payload = {
-        "alerta_activa": "true" if activa else "false",
-        "epicentro": epicentro,
-        "segundos_restantes": str(segundos)
-    }
+def update_fb(activa, epicentro="Normal", seg=0):
+    body = {"alerta_activa": "true" if activa else "false", "epicentro": epicentro, "segundos_restantes": str(seg)}
     try:
-        requests.put(DB_ENDPOINT, json=payload, timeout=10)
-        print(f"[*] Firebase -> Activa: {activa} | {epicentro}", flush=True)
-    except Exception as e:
-        print(f"[!] Error Firebase: {e}", flush=True)
+        requests.put(DB_URL, json=body, timeout=10)
+    except:
+        pass
 
-def vigilar_sismos():
-    global ULTIMO_ID_PROCESADO
-    print("[*] Vigilante de sismos 24/7 iniciado correctamente...", flush=True)
+def loop_sismos():
+    global LAST_ID
     while True:
         try:
-            r = requests.get(USGS_API_URL, timeout=10)
-            if r.status_code == 200:
-                data = r.json()
-                features = data.get("features", [])
-                if len(features) > 0:
-                    ultimo = features[0]
-                    sismo_id = ultimo.get("id")
-                    props = ultimo.get("properties", {})
+            res = requests.get(USGS_URL, timeout=10)
+            if res.status_code == 200:
+                features = res.json().get("features", [])
+                if features:
+                    first = features[0]
+                    sid = first.get("id")
+                    props = first.get("properties", {})
                     mag = props.get("mag")
+                    place = props.get("place", "Sismo detectado")
+                    t_sismo = props.get("time", 0)
+                    t_now = int(time.time() * 1000)
+
+                    if mag and mag >= MAG_MIN and (t_now - t_sismo) < 300000:
+                        if sid != LAST_ID:
+                            LAST_ID = sid
+                            update_fb(True, f"M{mag} - {place}", 35)
+                            time.sleep(45)
+                            update_fb(False, f"Ultimo: M{mag} - {place}", 0)
+        except:
+            pass
+        time.sleep(15)
+
+class Server(BaseHTTPRequestHandler):
+    def do_GET(self):
+        self.send_response(200)
+        self.end_headers()
+        self.wfile.write(b"OK")
+
+if __name__ == "__main__":
+    t = threading.Thread(target=loop_sismos, daemon=True)
+    t.start()
+    port = int(os.environ.get("PORT", 10000))
+    HTTPServer(("0.0.0.0", port), Server).serve_forever()
+    mag = props.get("mag")
                     lugar = props.get("place", "Ubicacion no especificada")
                     tiempo_ms = props.get("time", 0)
 
