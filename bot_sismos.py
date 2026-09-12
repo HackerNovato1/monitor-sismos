@@ -56,7 +56,7 @@ def loop():
                     t1 = p.get("time", 0)
                     t0 = int(time.time() * 1000)
                     
-                    if mag and mag >= 4.0 and (t0 - t1) < 300000:
+                    if mag and mag >= 1.0 and (t0 - t1) < 300000:
                         if es_zona_local(lat, lon, plc):
                             if sid != LAST:
                                 LAST = sid
