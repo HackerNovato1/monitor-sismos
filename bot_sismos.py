@@ -1,13 +1,11 @@
+import os
 import time
 import requests
 import threading
-import os
 from http.server import HTTPServer, BaseHTTPRequestHandler
 
-# --- CONFIGURACIÓN DE FIREBASE ---
 DB_ENDPOINT = "https://alertasismica-bf17b-default-rtdb.firebaseio.com/alerta.json"
 USGS_API_URL = "https://earthquake.usgs.gov/earthquakes/feed/v1.0/summary/all_hour.geojson"
-
 MAGNITUD_MINIMA = 4.5
 ULTIMO_ID_PROCESADO = None
 
@@ -18,23 +16,61 @@ def actualizar_firebase(activa, epicentro="Normal", segundos=0):
         "segundos_restantes": str(segundos)
     }
     try:
-        resp = requests.put(DB_ENDPOINT, json=payload, timeout=10)
-        print(f"[*] Firebase actualizado -> Activa: {activa} | {epicentro}")
+        requests.put(DB_ENDPOINT, json=payload, timeout=10)
+        print(f"[*] Firebase -> Activa: {activa} | {epicentro}", flush=True)
     except Exception as e:
-        print(f"[!] Error al actualizar Firebase: {e}")
+        print(f"[!] Error Firebase: {e}", flush=True)
 
 def vigilar_sismos():
     global ULTIMO_ID_PROCESADO
     print("[*] Vigilante de sismos 24/7 iniciado correctamente...", flush=True)
-
     while True:
         try:
             r = requests.get(USGS_API_URL, timeout=10)
             if r.status_code == 200:
                 data = r.json()
                 features = data.get("features", [])
-
                 if len(features) > 0:
+                    ultimo = features[0]
+                    sismo_id = ultimo.get("id")
+                    props = ultimo.get("properties", {})
+                    mag = props.get("mag")
+                    lugar = props.get("place", "Ubicacion no especificada")
+                    tiempo_ms = props.get("time", 0)
+
+                    tiempo_actual_ms = int(time.time() * 1000)
+                    es_reciente = (tiempo_actual_ms - tiempo_ms) < (5 * 60 * 1000)
+
+                    if mag is not None and mag >= MAGNITUD_MINIMA and es_reciente:
+                        if sismo_id != ULTIMO_ID_PROCESADO:
+                            ULTIMO_ID_PROCESADO = sismo_id
+                            print(f"[ALERTA SISMO] M{mag} - {lugar}", flush=True)
+                            actualizar_firebase(True, f"M{mag} - {lugar}", 35)
+                            time.sleep(45)
+                            actualizar_firebase(False, f"Ultimo: M{mag} - {lugar}", 0)
+        except Exception as err:
+            print(f"[!] Error ciclo: {err}", flush=True)
+
+        time.sleep(15)
+
+class WebHandler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        self.send_response(200)
+        self.send_header("Content-type", "text/plain")
+        self.end_headers()
+        self.wfile.write(b"OK - Monitor Sismico Activo")
+
+def iniciar_servidor():
+    port = int(os.environ.get("PORT", 10000))
+    server = HTTPServer(("0.0.0.0", port), WebHandler)
+    server.serve_forever()
+
+if __name__ == "__main__":
+    t = threading.Thread(target=vigilar_sismos)
+    t.daemon = True
+    t.start()
+    iniciar_servidor()
+    if len(features) > 0:
                     ultimo_sismo = features[0]
                     sismo_id = ultimo_sismo.get("id")
                     props = ultimo_sismo.get("properties", {})
