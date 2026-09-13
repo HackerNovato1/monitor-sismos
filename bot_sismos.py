@@ -8,6 +8,7 @@ DB = "https://alertasismica-bf17b-default-rtdb.firebaseio.com/alerta.json"
 USGS = "https://earthquake.usgs.gov/earthquakes/feed/v1.0/summary/all_hour.geojson"
 LAST = None
 
+# Limites geograficos para El Salvador y zonas maritimas / fronterizas
 LAT_MIN = 11.5
 LAT_MAX = 15.0
 LON_MIN = -91.5
@@ -42,8 +43,10 @@ def loop():
             r = requests.get(USGS, timeout=10)
             if r.status_code == 200:
                 fts = r.json().get("features", [])
-                if fts:
-                    f = fts[0]
+                t0 = int(time.time() * 1000)
+                
+                # Revisa toda la lista de eventos de la ultima hora, no solo el primero
+                for f in fts:
                     sid = f.get("id")
                     p = f.get("properties", {})
                     geom = f.get("geometry", {})
@@ -54,15 +57,16 @@ def loop():
                     mag = p.get("mag")
                     plc = p.get("place") or "Sismo"
                     t1 = p.get("time", 0)
-                    t0 = int(time.time() * 1000)
                     
-                    if mag and mag >= 1.0 and (t0 - t1) < 300000:
+                    # Filtro: magnitud >= 2.5 y margen de hasta 30 min (1800000 ms)
+                    if mag and mag >= 2.5 and (t0 - t1) < 1800000:
                         if es_zona_local(lat, lon, plc):
                             if sid != LAST:
                                 LAST = sid
                                 push(True, f"M{mag} - {plc}", 35, lat, lon)
                                 time.sleep(45)
                                 push(False, f"Ultimo: M{mag}", 0, lat, lon)
+                            break
         except:
             pass
         time.sleep(15)
